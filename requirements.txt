@@ -1,0 +1,8 @@
+streamlit
+transitions
+pandas
+plotly
+folium
+streamlit-folium
+kaleido
+openpyxl
