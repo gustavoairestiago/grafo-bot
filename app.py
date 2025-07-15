@@ -29,9 +29,11 @@ def name(label):
     return label.split(" (")[0]
 
 def aggregate_df(df, x, y, agg):
-    funcs = {"Média":"mean","Soma":"sum","Contagem":"count","Mínimo":"min","Máximo":"max"}
+    funcs = {"Média": "mean", "Soma": "sum", "Contagem": "count", "Contagem distinta": "nunique", "Mínimo": "min", "Máximo": "max"}
     if agg == "Contagem":
         return df.groupby(x)[y].count().reset_index(name=y)
+    elif agg == "Contagem distinta":
+        return df.groupby(x)[y].nunique().reset_index(name=y)
     return df.groupby(x)[y].agg(funcs[agg]).reset_index()
 
 def map_choro(df, geojson, column, fill_color):
@@ -122,10 +124,17 @@ elif bot.state == 'choose_chart':
 elif bot.state == 'chart_bar':
     st.write("**Barra com agregação**")
     x_opts = [o for o in format_cols(df) if "(Categórica)" in o or "(Texto)" in o]
-    y_opts = [o for o in format_cols(df) if "(Numérica)" in o]
-    xl = st.selectbox("Eixo X", x_opts, key="bx"); yl = st.selectbox("Eixo Y", y_opts, key="by")
-    agg = st.selectbox("Agregação", ["Média","Soma","Contagem","Mínimo","Máximo"], key="ba")
-    x = name(xl); y = name(yl)
+    y_opts = [o for o in format_cols(df)]
+    xl = st.selectbox("Eixo X", x_opts, key="bx")
+    yl = st.selectbox("Eixo Y", y_opts, key="by")
+    y_col_type = col_type(df, name(yl))
+    if y_col_type in ["Categórica", "Texto"]:
+        agg_opts = ["Contagem", "Contagem distinta"]
+    else:
+        agg_opts = ["Média", "Soma", "Contagem", "Mínimo", "Máximo","Contagem distinta"]
+    agg = st.selectbox("Agregação", agg_opts, key="ba")
+    x = name(xl)
+    y = name(yl)
 
     st.markdown("#### Opções avançadas")
     title = st.text_input("Título", value=f"{agg} de {y} por {x}", key="bt")
