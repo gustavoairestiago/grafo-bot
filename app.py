@@ -5,6 +5,27 @@ import plotly.express as px
 import folium
 from streamlit_folium import st_folium
 
+
+# ─── 0. Config e CSS para fundo branco ───────────────────────────────────────
+st.set_page_config(page_title="GrafoBot", layout="wide")
+st.markdown(
+    """
+    <style>
+      /* Fundo branco no app inteiro */
+      .reportview-container .main,
+      .reportview-container .block-container,
+      .sidebar .sidebar-content {
+        background-color: #FFFFFF;
+      }
+      /* Garante que o body também fique branco */
+      html, body {
+        background-color: #FFFFFF;
+      }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
 # 1. Projetos e paletas
 PROJECTS = {
     "Projeto Alpha": {"plotly": ["#005CA9","#FFA726","#66BB6A","#EF5350","#AB47BC"], "folium": "YlGn"},
@@ -34,7 +55,7 @@ def aggregate_df(df, x, y, agg):
         return df.groupby(x)[y].count().reset_index(name=y)
     elif agg == "Contagem distinta":
         return df.groupby(x)[y].nunique().reset_index(name=y)
-    return df.groupby(x)[y].agg(funcs[agg]).reset_index()
+    return df.groupby(x)[y].agg(funcs[agg]).reset_index(name=y)
 
 def map_choro(df, geojson, column, fill_color):
     m = folium.Map(location=[-14, -52], zoom_start=4)
@@ -88,8 +109,8 @@ if bot.state == 'project':
         bot.to_start(); upd(); st.rerun()
     st.stop()
 
-project = st.session_state['project']
-palette = PROJECTS[project]['plotly']
+project   = st.session_state['project']
+palette   = PROJECTS[project]['plotly']
 folium_pal = PROJECTS[project]['folium']
 
 # 6. Upload de dados
@@ -123,46 +144,80 @@ elif bot.state == 'choose_chart':
 # 8. Gráfico de Barras
 elif bot.state == 'chart_bar':
     st.write("**Barra com agregação**")
+    # X e Y
     x_opts = [o for o in format_cols(df) if "(Categórica)" in o or "(Texto)" in o]
     y_opts = [o for o in format_cols(df)]
     xl = st.selectbox("Eixo X", x_opts, key="bx")
     yl = st.selectbox("Eixo Y", y_opts, key="by")
-    y_col_type = col_type(df, name(yl))
-    if y_col_type in ["Categórica", "Texto"]:
-        agg_opts = ["Contagem", "Contagem distinta"]
-    else:
-        agg_opts = ["Média", "Soma", "Contagem", "Mínimo", "Máximo","Contagem distinta"]
-    agg = st.selectbox("Agregação", agg_opts, key="ba")
-    x = name(xl)
-    y = name(yl)
 
-    st.markdown("#### Opções avançadas")
+    # Escolha de agregação
+    y_col_type = col_type(df, name(yl))
+    agg_opts = ["Contagem", "Contagem distinta"] if y_col_type in ["Categórica","Texto"] \
+               else ["Média","Soma","Contagem","Mínimo","Máximo","Contagem distinta"]
+    agg = st.selectbox("Agregação", agg_opts, key="ba")
+
+    x = name(xl); y = name(yl)
+
+    # NOVO: Colorir por coluna não numérica
+    st.markdown("#### Colorir por (coluna não numérica)")
+    color_opts = ["(nenhum)"] + x_opts
+    cl = st.selectbox("Colorir por", color_opts, key="bc")
+    color_col = None if cl == "(nenhum)" else name(cl)
+
+    # Opções avançadas
     title = st.text_input("Título", value=f"{agg} de {y} por {x}", key="bt")
     meta  = st.text_area("Fonte / ano", key="bm")
     show  = st.checkbox("Exibir valores", value=True, key="bv")
     dec   = st.number_input("Casas decimais", min_value=0, max_value=6, value=2, key="bd")
 
     if st.button("Gerar gráfico"):
-        df2 = aggregate_df(df, x, y, agg)
+        # agrupa adequadamente
+        if color_col:
+            funcs = {
+                "Média": "mean", "Soma": "sum", "Contagem": "count",
+                "Mínimo": "min", "Máximo": "max", "Contagem distinta": "nunique"
+            }
+            if agg == "Contagem":
+                df2 = df.groupby([x, color_col])[y].count().reset_index(name=y)
+            elif agg == "Contagem distinta":
+                df2 = df.groupby([x, color_col])[y].nunique().reset_index(name=y)
+            else:
+                df2 = df.groupby([x, color_col])[y].agg(funcs[agg]).reset_index(name=y)
+        else:
+            df2 = aggregate_df(df, x, y, agg)
+
         labels = df2[y].round(dec) if show else None
-        fig = px.bar(
-            df2, x=x, y=y, color=x,
-            color_discrete_sequence=palette,
-            title=title,
-            text=labels
-        )
-        # fundo branco
-        fig.update_layout(font=dict(size=12,color='black'))
+
+        # monta o gráfico
+        if color_col:
+            fig = px.bar(
+                df2, x=x, y=y, color=color_col,
+                color_discrete_sequence=palette,
+                title=title, text=labels
+            )
+            fig.update_layout(showlegend=True, legend_title_text=cl)
+        else:
+            fig = px.bar(
+                df2, x=x, y=y,
+                title=title, text=labels
+            )
+            fig.update_traces(marker_color=palette[0])
+            fig.update_layout(showlegend=False)
+
+        # estilo geral
+        fig.update_layout(font=dict(size=12, color='black'))
         fig.update_traces(texttemplate='%{text}', textposition="auto")
+
+        # anotação de fonte
         if meta.strip():
             fig.add_annotation(
                 text=meta, xref="paper", yref="paper",
                 x=0, y=-0.22, showarrow=False,
-                font=dict(size=12,color="white"), align="left"
+                font=dict(size=12, color="white"), align="left"
             )
+
         st.plotly_chart(
-            fig,
-            use_container_width=True,
+            fig, use_container_width=True,
             config={
                 "toImageButtonOptions": {
                     "format":"png","filename":"grafico","height":500,"width":800,"scale":2
@@ -171,6 +226,7 @@ elif bot.state == 'chart_bar':
         )
         if meta.strip():
             st.markdown(f"_Fonte: {meta}_")
+
     if st.button("Voltar", on_click=lambda:[bot.back(),upd()]): st.rerun()
 
 # 9. Gráfico de Dispersão
